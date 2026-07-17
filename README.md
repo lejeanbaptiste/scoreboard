@@ -2,28 +2,42 @@
 
 Static leaderboard for [Le Jean-Baptiste](https://github.com/lejeanbaptiste/lejeanbaptiste).
 `index.html` reads `scores.json` and renders a ranked table — no build
-step, served as-is via GitHub Pages.
+step, served as-is via GitHub Pages at
+[lejeanbaptiste.github.io/scoreboard](https://lejeanbaptiste.github.io/scoreboard/).
 
-## Current status: Phase 1 (closed group)
+## How submission works (Phase 1, implemented)
 
-This repo is currently just the static display half. There is no
-submission pipeline yet — `scores.json` is a placeholder (`[]`) until the
-backend piece is built. Planned shape:
+There is no backend, no OAuth flow, and no credential this repo hands out
+to anyone:
 
-- Players authenticate with GitHub OAuth (real accounts, not free-text
-  names) and submit their current stats through a small backend API.
-- The backend rate-limits submissions per account and writes the
-  authoritative data to a datastore it controls.
-- A periodic job publishes `scores.json` here from that datastore. This
-  repo never accepts a direct write from a client.
+1. The desktop app's "Submit to Leaderboard" button opens
+   [issue #1](https://github.com/lejeanbaptiste/scoreboard/issues/1) (a
+   permanent, pinned thread) and the player posts a comment containing
+   their stats as a fenced ` ```json ` block.
+2. [`.github/workflows/process-submission.yml`](.github/workflows/process-submission.yml)
+   runs on that comment, using
+   [`scripts/process-submission.mjs`](scripts/process-submission.mjs) to
+   validate the payload, rate-limit (15 min between submissions per
+   identity), and update `scores.json` — committed with the repo's own
+   automatic, repo-scoped `GITHUB_TOKEN`. Nothing a client holds can write
+   to this repo directly.
+3. Identity comes from *who posted the comment* — GitHub itself guarantees
+   that (you cannot comment as someone else), so there's no separate login
+   step to build or maintain.
+
+This is a comment on an existing issue rather than a new issue per
+submission deliberately: opening an issue is a public GitHub contribution
+(shows up in the submitter's profile contribution graph); commenting is
+not. Repeated submissions shouldn't leave a trail on anyone's real GitHub
+activity stats.
 
 ## `scores.json` schema
 
 ```json
 [
   {
-    "id": "github account id or a stable per-install uuid",
-    "displayName": "Daniel",
+    "id": "the submitter's numeric GitHub user id",
+    "displayName": "their GitHub login",
     "commission": "Caporal, Order of the Angle Bracket",
     "metrics": {
       "texts": 1,
@@ -39,16 +53,14 @@ backend piece is built. Planned shape:
 ]
 ```
 
-`id` is the de-duplication key — a resubmission from the same identity
-updates that entry rather than creating a new row.
+`id` is the de-duplication key — a resubmission from the same GitHub
+account updates that entry rather than creating a new row.
 
-## Phase 2 (not built, noted for later)
+## Phase 2
 
-Phase 1's totals are still self-reported by the client, same as the local
-`achievements.json` file the desktop app already tracks — a submission
-channel secured with OAuth stops people from tampering with *each other's*
-rows, but not from lying about their own. Closing that gap means moving
-the source of truth for progress server-side (the app reports individual
-save events rather than a final tally, and the server computes totals from
-that log) rather than anything fixable in this repo. Only worth building
-if cheating actually becomes a real problem for a small community.
+Not built. Phase 1's totals are still self-reported by the client, same as
+the local `achievements.json` file the desktop app already tracks — a
+secured submission channel stops people from tampering with *each other's*
+rows, but not from lying about their own. See
+[`docs/PHASE_2.md`](docs/PHASE_2.md) for the scope of what closing that gap
+would actually require.

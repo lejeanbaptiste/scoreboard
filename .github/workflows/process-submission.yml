@@ -1,0 +1,66 @@
+name: Process score submission
+
+# Triggered by a comment on the pinned "Submit your Service Record here"
+# issue (#1) - see the desktop app's "Submit to Leaderboard" button. This
+# is a comment, not a new issue, deliberately: opening an issue counts as
+# a public GitHub contribution (shows up in the contributor's profile
+# graph); commenting does not. The only identity check here is GitHub's
+# own - you cannot post a comment as someone else - so
+# github.event.comment.user is trustworthy without any OAuth flow of our
+# own. The only credential involved is the automatic, repo-scoped
+# GITHUB_TOKEN - nothing a client ever sees.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+# Serializes concurrent submissions so two near-simultaneous comments
+# can't both check out scores.json and race each other's git push.
+concurrency:
+  group: leaderboard-submission
+  cancel-in-progress: false
+
+jobs:
+  process:
+    # Only the pinned "Submit your Service Record here" issue - ignore
+    # comments on anything else that might get opened in this repo.
+    if: github.event.issue.number == 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Process submission
+        id: process
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR_ID: ${{ github.event.comment.user.id }}
+          COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login }}
+        run: node scripts/process-submission.mjs
+
+      - name: Commit updated scores
+        if: steps.process.outputs.result == 'accepted'
+        run: |
+          git config user.name "leaderboard-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add scores.json
+          git commit -m "Update leaderboard: ${{ github.event.comment.user.login }}"
+          git push
+
+      - name: Reply with result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const message = `${{ steps.process.outputs.message }}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message,
+            });
