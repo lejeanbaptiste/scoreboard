@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LJB Service Record Leaderboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 20px 60px;
+    background: #0e1622;
+    color: #e8ecf2;
+    font-family: Georgia, 'Times New Roman', serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #d4af37;
+    letter-spacing: 3px;
+    font-size: 1.6rem;
+    text-transform: uppercase;
+    margin: 0 0 6px;
+    text-align: center;
+  }
+  .subtitle {
+    color: #8b93a6;
+    font-size: 0.9rem;
+    margin: 0 0 32px;
+    text-align: center;
+  }
+  table {
+    width: 100%;
+    max-width: 900px;
+    border-collapse: collapse;
+    background: #16233a;
+    border: 2px solid #d4af37;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  thead th {
+    background: #1c2c48;
+    color: #d4af37;
+    font-weight: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 0.78rem;
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 1px solid #3a4a63;
+  }
+  tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #23344f;
+    font-size: 0.95rem;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #1c2c48; }
+  td.rank {
+    color: #d4af37;
+    font-weight: bold;
+    width: 48px;
+  }
+  td.name { color: #f2ede2; }
+  td.commission { color: #c8b98a; font-size: 0.88rem; }
+  td.numeric { text-align: right; font-variant-numeric: tabular-nums; color: #d7dee8; }
+  .empty {
+    text-align: center;
+    color: #8b93a6;
+    padding: 60px 20px;
+    max-width: 900px;
+    border: 1px dashed #3a4a63;
+    border-radius: 10px;
+    width: 100%;
+  }
+  .updated {
+    color: #5b6579;
+    font-size: 0.78rem;
+    margin-top: 24px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <h1>LJB Service Record Leaderboard</h1>
+  <p class="subtitle">Ranked by total achievements unlocked, then by tags added.</p>
+  <div id="content">
+    <div class="empty">Loading…</div>
+  </div>
+  <p class="updated" id="updated"></p>
+
+<script>
+async function main() {
+  const content = document.getElementById('content');
+  let scores;
+  try {
+    const response = await fetch('scores.json', { cache: 'no-store' });
+    scores = await response.json();
+  } catch (err) {
+    content.innerHTML = '<div class="empty">Could not load scores.json.</div>';
+    return;
+  }
+
+  if (!Array.isArray(scores) || scores.length === 0) {
+    content.innerHTML = '<div class="empty">No scores submitted yet. Be the first to print a certificate and join the board.</div>';
+    return;
+  }
+
+  const sorted = [...scores].sort((a, b) => {
+    const unlockedDiff = (b.unlockedCount ?? 0) - (a.unlockedCount ?? 0);
+    if (unlockedDiff !== 0) return unlockedDiff;
+    return (b.metrics?.tags ?? 0) - (a.metrics?.tags ?? 0);
+  });
+
+  const rows = sorted
+    .map((entry, index) => {
+      const m = entry.metrics ?? {};
+      return `<tr>
+        <td class="rank">${index + 1}</td>
+        <td class="name">${escapeHtml(entry.displayName ?? 'Unknown')}</td>
+        <td class="commission">${escapeHtml(entry.commission ?? 'Unranked')}</td>
+        <td class="numeric">${(entry.unlockedCount ?? 0)} / ${(entry.totalAchievements ?? 0)}</td>
+        <td class="numeric">${(m.texts ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.tags ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.disambiguated ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.entities ?? 0).toLocaleString()}</td>
+      </tr>`;
+    })
+    .join('');
+
+  content.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Encoder</th>
+        <th>Commission</th>
+        <th>Achievements</th>
+        <th>Docs</th>
+        <th>Tags</th>
+        <th>Disambig.</th>
+        <th>Entities</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+
+  const latest = sorted.reduce((max, entry) => {
+    const t = entry.updatedAt ? new Date(entry.updatedAt).getTime() : 0;
+    return t > max ? t : max;
+  }, 0);
+  if (latest > 0) {
+    document.getElementById('updated').textContent =
+      'Last updated ' + new Date(latest).toLocaleString();
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]));
+}
+
+main();
+</script>
+</body>
+</html>
