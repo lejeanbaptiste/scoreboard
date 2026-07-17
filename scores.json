@@ -1,1 +1,17 @@
-[]
+[
+  {
+    "id": "76396963",
+    "displayName": "PotatoSinology",
+    "commission": "Caporal, Order of the Angle Bracket",
+    "metrics": {
+      "texts": 2,
+      "tags": 1594,
+      "disambiguated": 106,
+      "places": 8,
+      "entities": 50
+    },
+    "unlockedCount": 6,
+    "totalAchievements": 50,
+    "updatedAt": "2026-07-17T23:44:32.272Z"
+  }
+]
