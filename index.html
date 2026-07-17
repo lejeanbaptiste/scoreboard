@@ -52,6 +52,15 @@
     padding: 14px 16px;
     text-align: left;
     border-bottom: 1px solid #3a4a63;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: #f0d97a; }
+  thead th .sort-arrow {
+    display: inline-block;
+    width: 0.9em;
+    opacity: 0.6;
   }
   tbody td {
     padding: 12px 16px;
@@ -66,6 +75,12 @@
     width: 48px;
   }
   td.name { color: #f2ede2; }
+  td.name a {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dotted #5b6579;
+  }
+  td.name a:hover { border-bottom-color: #d4af37; }
   td.commission { color: #c8b98a; font-size: 0.88rem; }
   td.numeric { text-align: right; font-variant-numeric: tabular-nums; color: #d7dee8; }
   .empty {
@@ -83,17 +98,151 @@
     margin-top: 24px;
     text-align: center;
   }
+  #avatar-preview {
+    position: fixed;
+    display: none;
+    pointer-events: none;
+    z-index: 10;
+    border: 2px solid #d4af37;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    max-height: 160px;
+  }
 </style>
 </head>
 <body>
   <h1>LJB Service Record Leaderboard</h1>
-  <p class="subtitle">Ranked by total achievements unlocked, then by tags added.</p>
+  <p class="subtitle">Click a column to re-rank. Hover a name for their portrait.</p>
   <div id="content">
     <div class="empty">Loading…</div>
   </div>
   <p class="updated" id="updated"></p>
+  <img id="avatar-preview" alt="" />
 
 <script>
+const COLUMNS = [
+  { key: 'rank', label: '#', sortable: false },
+  { key: 'displayName', label: 'Encoder', type: 'string' },
+  { key: 'commission', label: 'Commission', type: 'string' },
+  { key: 'achievements', label: 'Achievements', type: 'number', defaultDir: 'desc' },
+  { key: 'texts', label: 'Docs', type: 'number', defaultDir: 'desc' },
+  { key: 'tags', label: 'Tags', type: 'number', defaultDir: 'desc' },
+  { key: 'disambiguated', label: 'Disambig.', type: 'number', defaultDir: 'desc' },
+  { key: 'entities', label: 'Entities', type: 'number', defaultDir: 'desc' },
+];
+
+const sortValue = (entry, key) => {
+  switch (key) {
+    case 'displayName':
+      return (entry.displayName ?? '').toLowerCase();
+    case 'commission':
+      return (entry.commission ?? '').toLowerCase();
+    case 'achievements':
+      return entry.unlockedCount ?? 0;
+    default:
+      return entry.metrics?.[key] ?? 0;
+  }
+};
+
+// Achievements-then-tags is the meaningful "overall rank"; every other
+// column sorts on just itself (ties keep the prior relative order).
+const compareEntries = (a, b, sort) => {
+  const dir = sort.direction === 'asc' ? 1 : -1;
+  if (sort.key === 'achievements') {
+    const primary = (a.unlockedCount ?? 0) - (b.unlockedCount ?? 0);
+    if (primary !== 0) return primary * dir;
+    return ((a.metrics?.tags ?? 0) - (b.metrics?.tags ?? 0)) * dir;
+  }
+  const av = sortValue(a, sort.key);
+  const bv = sortValue(b, sort.key);
+  if (av < bv) return -1 * dir;
+  if (av > bv) return 1 * dir;
+  return 0;
+};
+
+let currentSort = { key: 'achievements', direction: 'desc' };
+let currentScores = [];
+
+function render() {
+  const content = document.getElementById('content');
+  const sorted = [...currentScores].sort((a, b) => compareEntries(a, b, currentSort));
+
+  const headerCells = COLUMNS.map((col) => {
+    if (!col.sortable && col.sortable !== undefined) {
+      return `<th>${col.label}</th>`;
+    }
+    const isActive = currentSort.key === col.key;
+    const arrow = isActive ? (currentSort.direction === 'asc' ? '▲' : '▼') : '';
+    return `<th data-key="${col.key}"><span class="sort-arrow">${arrow}</span>${col.label}</th>`;
+  }).join('');
+
+  const rows = sorted
+    .map((entry, index) => {
+      const m = entry.metrics ?? {};
+      const login = encodeURIComponent(entry.displayName ?? '');
+      return `<tr>
+        <td class="rank">${index + 1}</td>
+        <td class="name" data-avatar-id="${escapeHtml(entry.id ?? '')}">
+          <a href="https://github.com/${login}" target="_blank" rel="noopener noreferrer">${escapeHtml(entry.displayName ?? 'Unknown')}</a>
+        </td>
+        <td class="commission">${escapeHtml(entry.commission ?? 'Unranked')}</td>
+        <td class="numeric">${(entry.unlockedCount ?? 0)} / ${(entry.totalAchievements ?? 0)}</td>
+        <td class="numeric">${(m.texts ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.tags ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.disambiguated ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.entities ?? 0).toLocaleString()}</td>
+      </tr>`;
+    })
+    .join('');
+
+  content.innerHTML = `<table>
+    <thead><tr>${headerCells}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+
+  content.querySelectorAll('thead th[data-key]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.key;
+      const col = COLUMNS.find((c) => c.key === key);
+      if (currentSort.key === key) {
+        currentSort = { key, direction: currentSort.direction === 'asc' ? 'desc' : 'asc' };
+      } else {
+        currentSort = { key, direction: col.defaultDir ?? 'asc' };
+      }
+      render();
+    });
+  });
+
+  const preview = document.getElementById('avatar-preview');
+  content.querySelectorAll('td.name[data-avatar-id]').forEach((cell) => {
+    const id = cell.dataset.avatarId;
+    if (!id) return;
+    cell.addEventListener('mouseenter', (event) => {
+      preview.src = `avatars/${id}.png`;
+      preview.style.display = 'block';
+      positionPreview(event);
+    });
+    cell.addEventListener('mousemove', positionPreview);
+    cell.addEventListener('mouseleave', () => {
+      preview.style.display = 'none';
+      preview.removeAttribute('src');
+    });
+  });
+}
+
+function positionPreview(event) {
+  const preview = document.getElementById('avatar-preview');
+  preview.style.left = `${event.clientX + 16}px`;
+  preview.style.top = `${event.clientY + 16}px`;
+}
+
+// No portrait submitted yet for this entry (older submission, or the
+// desktop app didn't send one) - fail quietly rather than show a broken
+// image icon.
+document.getElementById('avatar-preview').addEventListener('error', function () {
+  this.style.display = 'none';
+});
+
 async function main() {
   const content = document.getElementById('content');
   let scores;
@@ -110,45 +259,10 @@ async function main() {
     return;
   }
 
-  const sorted = [...scores].sort((a, b) => {
-    const unlockedDiff = (b.unlockedCount ?? 0) - (a.unlockedCount ?? 0);
-    if (unlockedDiff !== 0) return unlockedDiff;
-    return (b.metrics?.tags ?? 0) - (a.metrics?.tags ?? 0);
-  });
+  currentScores = scores;
+  render();
 
-  const rows = sorted
-    .map((entry, index) => {
-      const m = entry.metrics ?? {};
-      return `<tr>
-        <td class="rank">${index + 1}</td>
-        <td class="name">${escapeHtml(entry.displayName ?? 'Unknown')}</td>
-        <td class="commission">${escapeHtml(entry.commission ?? 'Unranked')}</td>
-        <td class="numeric">${(entry.unlockedCount ?? 0)} / ${(entry.totalAchievements ?? 0)}</td>
-        <td class="numeric">${(m.texts ?? 0).toLocaleString()}</td>
-        <td class="numeric">${(m.tags ?? 0).toLocaleString()}</td>
-        <td class="numeric">${(m.disambiguated ?? 0).toLocaleString()}</td>
-        <td class="numeric">${(m.entities ?? 0).toLocaleString()}</td>
-      </tr>`;
-    })
-    .join('');
-
-  content.innerHTML = `<table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Encoder</th>
-        <th>Commission</th>
-        <th>Achievements</th>
-        <th>Docs</th>
-        <th>Tags</th>
-        <th>Disambig.</th>
-        <th>Entities</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-
-  const latest = sorted.reduce((max, entry) => {
+  const latest = scores.reduce((max, entry) => {
     const t = entry.updatedAt ? new Date(entry.updatedAt).getTime() : 0;
     return t > max ? t : max;
   }, 0);
