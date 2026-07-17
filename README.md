@@ -5,31 +5,36 @@ Static leaderboard for [Le Jean-Baptiste](https://github.com/lejeanbaptiste/leje
 step, served as-is via GitHub Pages at
 [lejeanbaptiste.github.io/scoreboard](https://lejeanbaptiste.github.io/scoreboard/).
 
-## How submission works (Phase 1, implemented)
+## How submission works (Phase 1.5, implemented)
 
-There is no backend, no OAuth flow, and no credential this repo hands out
-to anyone:
+The desktop app's "Submit to Leaderboard" button logs the player in via
+GitHub OAuth Device Flow (once — the token is cached locally after that)
+and calls the [`worker/`](worker/) directly:
 
-1. The desktop app's "Submit to Leaderboard" button opens
-   [issue #1](https://github.com/lejeanbaptiste/scoreboard/issues/1) (a
-   permanent, pinned thread) and the player posts a comment containing
-   their stats as a fenced ` ```json ` block.
-2. [`.github/workflows/process-submission.yml`](.github/workflows/process-submission.yml)
-   runs on that comment, using
-   [`scripts/process-submission.mjs`](scripts/process-submission.mjs) to
-   validate the payload, rate-limit (15 min between submissions per
-   identity), and update `scores.json` — committed with the repo's own
-   automatic, repo-scoped `GITHUB_TOKEN`. Nothing a client holds can write
-   to this repo directly.
-3. Identity comes from *who posted the comment* — GitHub itself guarantees
-   that (you cannot comment as someone else), so there's no separate login
-   step to build or maintain.
+1. **Identity**: the Worker takes the player's token and calls GitHub's
+   own `GET /user` with it — a client can claim anything else in the
+   request, but not this. The OAuth app only ever requests read-your-own-
+   profile access; it can't touch the org, its repos, or anything else.
+2. **Write access**: the Worker publishes `scores.json` to this repo using
+   a fine-grained PAT scoped to only this repo's contents, set as a Worker
+   secret. No client, including the desktop app, ever holds a credential
+   that can write here.
+3. **Rate limiting**: 15 minutes between submissions per GitHub account
+   id, tracked in the Worker's KV store.
 
-This is a comment on an existing issue rather than a new issue per
-submission deliberately: opening an issue is a public GitHub contribution
-(shows up in the submitter's profile contribution graph); commenting is
-not. Repeated submissions shouldn't leave a trail on anyone's real GitHub
-activity stats.
+See [`worker/README.md`](worker/README.md) for the Worker itself.
+
+### Fallback: comment-based submission (Phase 1, still live)
+
+If the Worker is ever down, [issue #1](https://github.com/lejeanbaptiste/scoreboard/issues/1)
+(a permanent, pinned thread) still works as a manual fallback: post a
+comment there with your stats as a fenced ` ```json ` block, and
+[`.github/workflows/process-submission.yml`](.github/workflows/process-submission.yml)
+validates, rate-limits, and updates `scores.json` the same way, using only
+the repo's own automatic `GITHUB_TOKEN` — no separate credential. This is
+a comment on an existing issue rather than a new issue per submission
+deliberately: opening an issue is a public GitHub contribution (shows up
+in the submitter's profile graph); commenting is not.
 
 ## `scores.json` schema
 
@@ -58,9 +63,9 @@ account updates that entry rather than creating a new row.
 
 ## Phase 2
 
-Not built. Phase 1's totals are still self-reported by the client, same as
-the local `achievements.json` file the desktop app already tracks — a
-secured submission channel stops people from tampering with *each other's*
-rows, but not from lying about their own. See
+Not built. Totals are still self-reported by the client, same as the
+local `achievements.json` file the desktop app already tracks — a secured
+submission channel (either path above) stops people from tampering with
+*each other's* rows, but not from lying about their own. See
 [`docs/PHASE_2.md`](docs/PHASE_2.md) for the scope of what closing that gap
 would actually require.
