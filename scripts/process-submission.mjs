@@ -26,7 +26,9 @@ function setOutput(name, value) {
     console.log(`${name}=${value}`);
   }
 }
-const RATE_LIMIT_MS = 15 * 60 * 1000;
+// Just enough to stop literal spam-commenting, not to slow down a
+// genuine re-check after making progress.
+const RATE_LIMIT_MS = 2 * 60 * 1000;
 const MAX_STRING_LENGTH = 200;
 const MAX_METRIC_VALUE = 10_000_000;
 
@@ -108,7 +110,7 @@ function main() {
     }
   }
 
-  const entry = {
+  const candidate = {
     id: authorId,
     displayName: authorLogin,
     commission: submission.commission,
@@ -118,15 +120,29 @@ function main() {
     updatedAt: now.toISOString(),
   };
 
+  // Local progress is a high-water mark (it only ever increases), so a
+  // legitimate resubmission should never rank lower than a previous one -
+  // keep whichever submission ranks higher wholesale (not a field-by-field
+  // merge) so stats and commission stay internally consistent. Mirrors the
+  // Worker's same logic (the primary submission path) - see worker/README.
+  const existing = existingIndex >= 0 ? scores[existingIndex] : null;
+  const isImprovement = !existing || candidate.unlockedCount >= existing.unlockedCount;
+  const finalEntry = isImprovement ? candidate : existing;
+
   if (existingIndex >= 0) {
-    scores[existingIndex] = entry;
+    scores[existingIndex] = finalEntry;
   } else {
-    scores.push(entry);
+    scores.push(finalEntry);
   }
 
   writeFileSync(SCORES_PATH, `${JSON.stringify(scores, null, 2)}\n`, 'utf8');
   setOutput('result', 'accepted');
-  setOutput('message', `Added to the leaderboard as ${authorLogin}.`);
+  setOutput(
+    'message',
+    isImprovement
+      ? `Added to the leaderboard as ${authorLogin}.`
+      : `Your best score is already on the leaderboard as ${authorLogin} - this submission ranked lower, so it was not applied.`,
+  );
 }
 
 main();

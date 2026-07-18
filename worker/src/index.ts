@@ -11,7 +11,9 @@ const REPO_NAME = 'scoreboard';
 const SCORES_PATH = 'scores.json';
 const AVATARS_DIR = 'avatars';
 
-const RATE_LIMIT_MS = 15 * 60 * 1000;
+// Just enough to stop literal spam-clicking, not to slow down a genuine
+// re-check after making progress.
+const RATE_LIMIT_MS = 2 * 60 * 1000;
 const MAX_STRING_LENGTH = 200;
 const MAX_METRIC_VALUE = 10_000_000;
 const REQUIRED_METRIC_KEYS = ['texts', 'tags', 'disambiguated', 'places', 'entities'] as const;
@@ -213,7 +215,7 @@ async function handleSubmit(request: Request, env: Env): Promise<Response> {
   }
 
   const now = new Date();
-  const entry: ScoreEntry = {
+  const candidate: ScoreEntry = {
     id,
     displayName: user.login,
     commission: submission.commission,
@@ -223,7 +225,18 @@ async function handleSubmit(request: Request, env: Env): Promise<Response> {
     updatedAt: now.toISOString(),
   };
 
-  await env.LEADERBOARD_KV.put(`score:${id}`, JSON.stringify(entry));
+  // Local progress is a high-water mark (it only ever increases), so a
+  // legitimate resubmission should never rank lower than a previous one -
+  // the only way that happens is a submission from a machine/project
+  // that's genuinely behind. Keep whichever submission ranks higher
+  // wholesale (not a field-by-field merge) so stats and commission stay
+  // internally consistent with each other.
+  const existingRaw = await env.LEADERBOARD_KV.get(`score:${id}`);
+  const existing = existingRaw ? (JSON.parse(existingRaw) as ScoreEntry) : null;
+  const isImprovement = !existing || candidate.unlockedCount >= existing.unlockedCount;
+  const finalEntry = isImprovement ? candidate : existing;
+
+  await env.LEADERBOARD_KV.put(`score:${id}`, JSON.stringify(finalEntry));
   await env.LEADERBOARD_KV.put(rateLimitKey, String(now.getTime()));
 
   const avatarBytes = validateAvatarBase64((body as Record<string, unknown>).avatarPngBase64);
@@ -238,7 +251,12 @@ async function handleSubmit(request: Request, env: Env): Promise<Response> {
   const allEntries = await loadAllEntries(env.LEADERBOARD_KV);
   await publishScoresJson(env, allEntries);
 
-  return json({ ok: true, message: `Added to the leaderboard as ${user.login}.` });
+  return json({
+    ok: true,
+    message: isImprovement
+      ? `Added to the leaderboard as ${user.login}.`
+      : `Your best score is already on the leaderboard as ${user.login} - this submission ranked lower, so it was not applied.`,
+  });
 }
 
 export default {
