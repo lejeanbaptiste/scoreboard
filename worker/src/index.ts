@@ -9,11 +9,16 @@ export interface Env {
 const REPO_OWNER = 'lejeanbaptiste';
 const REPO_NAME = 'scoreboard';
 const SCORES_PATH = 'scores.json';
+const AVATARS_DIR = 'avatars';
 
 const RATE_LIMIT_MS = 15 * 60 * 1000;
 const MAX_STRING_LENGTH = 200;
 const MAX_METRIC_VALUE = 10_000_000;
 const REQUIRED_METRIC_KEYS = ['texts', 'tags', 'disambiguated', 'places', 'entities'] as const;
+// Generous for a small hover-preview thumbnail (a few hundred KB at most);
+// well short of what would make a submission slow or bloat the repo.
+const MAX_AVATAR_BASE64_LENGTH = 500_000;
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -70,6 +75,25 @@ function validateSubmission(raw: unknown): ValidatedSubmission | null {
   };
 }
 
+/** Decodes and sanity-checks an optional avatar payload. Returns null for
+ * "no avatar sent" (fine, just skip uploading one) as well as for
+ * anything malformed/oversized/not actually a PNG (also fine - a broken
+ * avatar upload should never fail the underlying score submission). */
+function validateAvatarBase64(raw: unknown): Uint8Array | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_AVATAR_BASE64_LENGTH) {
+    return null;
+  }
+  try {
+    const binary = atob(raw);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    if (!PNG_MAGIC.every((byte, i) => bytes[i] === byte)) return null;
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 interface GitHubUser {
   id: number;
   login: string;
@@ -117,11 +141,16 @@ async function loadAllEntries(kv: KVNamespace): Promise<ScoreEntry[]> {
   return entries;
 }
 
-/** Publishes the full scores array to the public repo via GitHub's
- * Contents API - the only thing with write access to that repo is this
- * Worker's own secret, never a client. */
-async function publishScoresJson(env: Env, entries: ScoreEntry[]): Promise<void> {
-  const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${SCORES_PATH}`;
+/** Writes (or overwrites) a file in the public repo via GitHub's Contents
+ * API - the only thing with write access to that repo is this Worker's
+ * own secret, never a client. */
+async function putGitHubFile(
+  env: Env,
+  path: string,
+  base64Content: string,
+  message: string,
+): Promise<void> {
+  const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
   const headers = {
     authorization: `Bearer ${env.GITHUB_WRITE_TOKEN}`,
     'user-agent': 'ljb-leaderboard-worker',
@@ -131,21 +160,26 @@ async function publishScoresJson(env: Env, entries: ScoreEntry[]): Promise<void>
   const existing = await fetch(apiUrl, { headers });
   const sha = existing.ok ? ((await existing.json()) as { sha?: string }).sha : undefined;
 
-  const content = `${JSON.stringify(entries, null, 2)}\n`;
-  const base64Content = btoa(unescape(encodeURIComponent(content)));
-
   const putResponse = await fetch(apiUrl, {
     method: 'PUT',
     headers: { ...headers, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      message: `Update leaderboard (${entries.length} entries)`,
-      content: base64Content,
-      sha,
-    }),
+    body: JSON.stringify({ message, content: base64Content, sha }),
   });
   if (!putResponse.ok) {
-    throw new Error(`GitHub contents PUT failed: ${putResponse.status} ${await putResponse.text()}`);
+    throw new Error(`GitHub contents PUT failed for ${path}: ${putResponse.status} ${await putResponse.text()}`);
   }
+}
+
+async function publishScoresJson(env: Env, entries: ScoreEntry[]): Promise<void> {
+  const content = `${JSON.stringify(entries, null, 2)}\n`;
+  const base64Content = btoa(unescape(encodeURIComponent(content)));
+  await putGitHubFile(env, SCORES_PATH, base64Content, `Update leaderboard (${entries.length} entries)`);
+}
+
+/** Best-effort - a failed avatar upload should never fail the underlying
+ * score submission, so callers just log and move on. */
+async function publishAvatar(env: Env, id: string, base64Png: string): Promise<void> {
+  await putGitHubFile(env, `${AVATARS_DIR}/${id}.png`, base64Png, `Update avatar for ${id}`);
 }
 
 async function handleSubmit(request: Request, env: Env): Promise<Response> {
@@ -191,6 +225,15 @@ async function handleSubmit(request: Request, env: Env): Promise<Response> {
 
   await env.LEADERBOARD_KV.put(`score:${id}`, JSON.stringify(entry));
   await env.LEADERBOARD_KV.put(rateLimitKey, String(now.getTime()));
+
+  const avatarBytes = validateAvatarBase64((body as Record<string, unknown>).avatarPngBase64);
+  if (avatarBytes) {
+    try {
+      await publishAvatar(env, id, (body as Record<string, string>).avatarPngBase64);
+    } catch {
+      // Decorative - never fail the score submission over a portrait upload.
+    }
+  }
 
   const allEntries = await loadAllEntries(env.LEADERBOARD_KV);
   await publishScoresJson(env, allEntries);
