@@ -17,6 +17,7 @@ const RATE_LIMIT_MS = 2 * 60 * 1000;
 const MAX_STRING_LENGTH = 200;
 const MAX_METRIC_VALUE = 10_000_000;
 const REQUIRED_METRIC_KEYS = ['texts', 'tags', 'disambiguated', 'places', 'entities'] as const;
+const METRIC_KEYS = [...REQUIRED_METRIC_KEYS, 'published'] as const;
 // Generous for a small hover-preview thumbnail (a few hundred KB at most);
 // well short of what would make a submission slow or bloat the repo.
 const MAX_AVATAR_BASE64_LENGTH = 500_000;
@@ -36,7 +37,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 function isFiniteNonNegative(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_METRIC_VALUE;
+  return (
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_METRIC_VALUE
+  );
 }
 
 function clampString(value: unknown, fallback: string): string {
@@ -47,7 +50,7 @@ function clampString(value: unknown, fallback: string): string {
 
 interface ValidatedSubmission {
   commission: string;
-  metrics: Record<(typeof REQUIRED_METRIC_KEYS)[number], number>;
+  metrics: Record<(typeof METRIC_KEYS)[number], number>;
   unlockedCount: number;
   totalAchievements: number;
 }
@@ -64,13 +67,19 @@ function validateSubmission(raw: unknown): ValidatedSubmission | null {
   for (const key of REQUIRED_METRIC_KEYS) {
     if (!isFiniteNonNegative(metricsRecord[key])) return null;
   }
+  if (metricsRecord.published !== undefined && !isFiniteNonNegative(metricsRecord.published)) {
+    return null;
+  }
   if (!isFiniteNonNegative(body.unlockedCount) || !isFiniteNonNegative(body.totalAchievements)) {
     return null;
   }
   return {
-    commission: clampString(body.commission, 'Unranked'),
+    commission: clampString(body.commission, 'Civil'),
     metrics: Object.fromEntries(
-      REQUIRED_METRIC_KEYS.map((key) => [key, metricsRecord[key] as number]),
+      METRIC_KEYS.map((key) => [
+        key,
+        key === 'published' ? (metricsRecord[key] ?? 0) : metricsRecord[key],
+      ]),
     ) as ValidatedSubmission['metrics'],
     unlockedCount: body.unlockedCount as number,
     totalAchievements: body.totalAchievements as number,
@@ -168,14 +177,21 @@ async function putGitHubFile(
     body: JSON.stringify({ message, content: base64Content, sha }),
   });
   if (!putResponse.ok) {
-    throw new Error(`GitHub contents PUT failed for ${path}: ${putResponse.status} ${await putResponse.text()}`);
+    throw new Error(
+      `GitHub contents PUT failed for ${path}: ${putResponse.status} ${await putResponse.text()}`,
+    );
   }
 }
 
 async function publishScoresJson(env: Env, entries: ScoreEntry[]): Promise<void> {
   const content = `${JSON.stringify(entries, null, 2)}\n`;
   const base64Content = btoa(unescape(encodeURIComponent(content)));
-  await putGitHubFile(env, SCORES_PATH, base64Content, `Update leaderboard (${entries.length} entries)`);
+  await putGitHubFile(
+    env,
+    SCORES_PATH,
+    base64Content,
+    `Update leaderboard (${entries.length} entries)`,
+  );
 }
 
 /** Best-effort - a failed avatar upload should never fail the underlying
@@ -192,9 +208,10 @@ async function handleSubmit(request: Request, env: Env): Promise<Response> {
     return json({ error: 'Request body must be JSON.' }, 400);
   }
 
-  const token = typeof (body as Record<string, unknown>)?.token === 'string'
-    ? (body as Record<string, string>).token
-    : null;
+  const token =
+    typeof (body as Record<string, unknown>)?.token === 'string'
+      ? (body as Record<string, string>).token
+      : null;
   if (!token) return json({ error: 'Missing token.' }, 400);
 
   const submission = validateSubmission(body);
@@ -210,7 +227,12 @@ async function handleSubmit(request: Request, env: Env): Promise<Response> {
     const elapsed = Date.now() - Number(lastSubmitted);
     if (elapsed < RATE_LIMIT_MS) {
       const waitMinutes = Math.ceil((RATE_LIMIT_MS - elapsed) / 60000);
-      return json({ error: `Submitted too recently - try again in about ${waitMinutes} minute(s).` }, 429);
+      return json(
+        {
+          error: `Submitted too recently - try again in about ${waitMinutes} minute(s).`,
+        },
+        429,
+      );
     }
   }
 

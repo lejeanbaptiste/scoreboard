@@ -33,6 +33,7 @@ const MAX_STRING_LENGTH = 200;
 const MAX_METRIC_VALUE = 10_000_000;
 
 const REQUIRED_METRIC_KEYS = ['texts', 'tags', 'disambiguated', 'places', 'entities'];
+const METRIC_KEYS = [...REQUIRED_METRIC_KEYS, 'published'];
 
 function extractJsonBlock(body) {
   const match = /```json\s*([\s\S]*?)```/.exec(body ?? '');
@@ -45,7 +46,9 @@ function extractJsonBlock(body) {
 }
 
 function isFiniteNonNegative(value) {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_METRIC_VALUE;
+  return (
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_METRIC_VALUE
+  );
 }
 
 function clampString(value, fallback) {
@@ -64,12 +67,15 @@ function validateSubmission(raw) {
   for (const key of REQUIRED_METRIC_KEYS) {
     if (!isFiniteNonNegative(metrics[key])) return null;
   }
+  if (metrics.published !== undefined && !isFiniteNonNegative(metrics.published)) return null;
   if (!isFiniteNonNegative(raw.unlockedCount) || !isFiniteNonNegative(raw.totalAchievements)) {
     return null;
   }
   return {
-    commission: clampString(raw.commission, 'Unranked'),
-    metrics: Object.fromEntries(REQUIRED_METRIC_KEYS.map((key) => [key, metrics[key]])),
+    commission: clampString(raw.commission, 'Civil'),
+    metrics: Object.fromEntries(
+      METRIC_KEYS.map((key) => [key, key === 'published' ? (metrics[key] ?? 0) : metrics[key]]),
+    ),
     unlockedCount: raw.unlockedCount,
     totalAchievements: raw.totalAchievements,
   };
@@ -105,7 +111,10 @@ function main() {
     if (now.getTime() - lastUpdated < RATE_LIMIT_MS) {
       const waitMinutes = Math.ceil((RATE_LIMIT_MS - (now.getTime() - lastUpdated)) / 60000);
       setOutput('result', 'rate-limited');
-      setOutput('message', `You already submitted recently - try again in about ${waitMinutes} minute(s).`);
+      setOutput(
+        'message',
+        `You already submitted recently - try again in about ${waitMinutes} minute(s).`,
+      );
       return;
     }
   }

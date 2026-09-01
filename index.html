@@ -128,7 +128,9 @@ const COLUMNS = [
   { key: 'texts', label: 'Docs', type: 'number', defaultDir: 'desc' },
   { key: 'tags', label: 'Tags', type: 'number', defaultDir: 'desc' },
   { key: 'disambiguated', label: 'Disambig.', type: 'number', defaultDir: 'desc' },
+  { key: 'places', label: 'Places', type: 'number', defaultDir: 'desc' },
   { key: 'entities', label: 'Entities', type: 'number', defaultDir: 'desc' },
+  { key: 'published', label: 'Days', type: 'number', defaultDir: 'desc' },
 ];
 
 const sortValue = (entry, key) => {
@@ -182,15 +184,17 @@ function render() {
       const login = encodeURIComponent(entry.displayName ?? '');
       return `<tr>
         <td class="rank">${index + 1}</td>
-        <td class="name" data-avatar-id="${escapeHtml(entry.id ?? '')}">
+        <td class="name" data-avatar-id="${escapeHtml(entry.id ?? '')}" data-avatar-v="${escapeHtml(entry.updatedAt ?? '')}">
           <a href="https://github.com/${login}" target="_blank" rel="noopener noreferrer">${escapeHtml(entry.displayName ?? 'Unknown')}</a>
         </td>
-        <td class="commission">${escapeHtml(entry.commission ?? 'Unranked')}</td>
+        <td class="commission">${escapeHtml(entry.commission ?? 'Civil')}</td>
         <td class="numeric">${(entry.unlockedCount ?? 0)} / ${(entry.totalAchievements ?? 0)}</td>
         <td class="numeric">${(m.texts ?? 0).toLocaleString()}</td>
         <td class="numeric">${(m.tags ?? 0).toLocaleString()}</td>
         <td class="numeric">${(m.disambiguated ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.places ?? 0).toLocaleString()}</td>
         <td class="numeric">${(m.entities ?? 0).toLocaleString()}</td>
+        <td class="numeric">${(m.published ?? 0).toLocaleString()}</td>
       </tr>`;
     })
     .join('');
@@ -217,8 +221,9 @@ function render() {
   content.querySelectorAll('td.name[data-avatar-id]').forEach((cell) => {
     const id = cell.dataset.avatarId;
     if (!id) return;
+    const version = cell.dataset.avatarV;
     cell.addEventListener('mouseenter', (event) => {
-      preview.src = `avatars/${id}.png`;
+      preview.src = `avatars/${id}.png${version ? `?v=${encodeURIComponent(version)}` : ''}`;
       preview.style.display = 'block';
       positionPreview(event);
     });

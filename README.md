@@ -43,16 +43,17 @@ in the submitter's profile graph); commenting is not.
   {
     "id": "the submitter's numeric GitHub user id",
     "displayName": "their GitHub login",
-    "commission": "Caporal, Order of the Angle Bracket",
+    "commission": "Caporal, Order of the Chevron",
     "metrics": {
       "texts": 1,
       "tags": 797,
       "disambiguated": 53,
       "places": 4,
-      "entities": 50
+      "entities": 50,
+      "published": 25
     },
     "unlockedCount": 6,
-    "totalAchievements": 50,
+    "totalAchievements": 66,
     "updatedAt": "2026-07-18T00:00:00.000Z"
   }
 ]
@@ -66,6 +67,6 @@ account updates that entry rather than creating a new row.
 Not built. Totals are still self-reported by the client, same as the
 local `achievements.json` file the desktop app already tracks — a secured
 submission channel (either path above) stops people from tampering with
-*each other's* rows, but not from lying about their own. See
+_each other's_ rows, but not from lying about their own. See
 [`docs/PHASE_2.md`](docs/PHASE_2.md) for the scope of what closing that gap
 would actually require.
